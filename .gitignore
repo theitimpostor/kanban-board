@@ -1,0 +1,5 @@
+node_modules/
+# Your board data stays local
+data.json
+data.json.tmp
+.DS_Store

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kanban Board</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect x='1' y='2' width='4' height='12' rx='1' fill='%234f6bed'/><rect x='6' y='2' width='4' height='8' rx='1' fill='%234f6bed'/><rect x='11' y='2' width='4' height='5' rx='1' fill='%234f6bed'/></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Kanban</h1>
+    <input id="search" type="search" placeholder="Filter cards…" aria-label="Filter cards">
+  </header>
+
+  <main id="board" class="board" aria-live="polite"></main>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <dialog id="card-dialog">
+    <form id="card-form" method="dialog">
+      <label>Title
+        <input name="title" required maxlength="200">
+      </label>
+      <label>Description
+        <textarea name="description" rows="6" maxlength="5000" placeholder="Add more details…"></textarea>
+      </label>
+      <fieldset class="labels">
+        <legend>Label</legend>
+        <div id="label-options"></div>
+      </fieldset>
+      <p class="meta" id="card-meta"></p>
+      <div class="dialog-actions">
+        <button type="button" class="danger" id="delete-card">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="cancel-card">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
