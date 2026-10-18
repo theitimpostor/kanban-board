@@ -26,15 +26,15 @@ jobs:
       # Step 1: Check out the project code.
       # Credentials are not left in .git/config, so Claude (step 3) can't push with them.
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
 
       # Step 2: Set up Node.js & Install Claude Code CLI
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
@@ -68,6 +68,7 @@ jobs:
           2. Ensure all tests pass.
           3. Do not alter unneeded files.
           4. Do not run git commit, git push or create pull requests; the workflow does that.
+          5. Do not modify anything under .github/; such changes are discarded.
           EOF
           )
 
@@ -87,6 +88,15 @@ jobs:
           BRANCH_NAME: ${{ steps.agent.outputs.branch }}
         run: |
           set -euo pipefail
+
+          # GITHUB_TOKEN can't push workflow changes, and an issue shouldn't rewrite
+          # its own automation: drop anything Claude changed under .github/.
+          if [ -n "$(git status --porcelain -- .github)" ]; then
+            echo "::warning::Discarded Claude's changes under .github/:"
+            git status --porcelain -- .github
+            git checkout HEAD -- .github
+            git clean -fdq -- .github
+          fi
 
           # Nothing changed? Then there is nothing to push.
           if [ -z "$(git status --porcelain)" ]; then
