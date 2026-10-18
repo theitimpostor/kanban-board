@@ -1,0 +1,170 @@
+name: Claude PR Changes Agent
+run-name: 'Claude PR Changes Agent (PR #${{ inputs.pr_number }})'
+
+# Started explicitly (workflow_dispatch) by claude-review.yml when the review agent
+# requests changes, because reviews made with GITHUB_TOKEN do not trigger workflows.
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to update
+        required: true
+      review_id:
+        description: ID of the review agent's review to address
+        required: true
+
+concurrency:
+  group: claude-pr-changes-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write    # labels
+      actions: write   # to start the review agent again
+    env:
+      GH_REPO: ${{ github.repository }}  # gh needs this before (and without) a checkout
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+      REVIEW_ID: ${{ inputs.review_id }}
+      MARKER: '<!-- claude-review-agent -->'
+
+    steps:
+      - name: Resolve PR and review
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          INFO=$(gh api "repos/$REPO/pulls/$PR_NUMBER")
+          HEAD_REF=$(printf '%s' "$INFO" | jq -r '.head.ref')
+          HEAD_REPO=$(printf '%s' "$INFO" | jq -r '.head.repo.full_name')
+          STATE=$(printf '%s' "$INFO" | jq -r '.state')
+          DEFAULT_BRANCH=$(gh api "repos/$REPO" --jq '.default_branch')
+
+          # Only update open agent PRs from this repo
+          if [ "$STATE" != "open" ] || [[ "$HEAD_REF" != claude/* ]] || [ "$HEAD_REPO" != "$REPO" ]; then
+            echo "Skipping PR #$PR_NUMBER (state=$STATE, head=$HEAD_REF, repo=$HEAD_REPO)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Only act on reviews written by the review agent
+          REVIEW=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID")
+          if ! printf '%s' "$REVIEW" | jq -e --arg m "$MARKER" '(.body // "") | contains($m)' > /dev/null; then
+            echo "::warning::Review $REVIEW_ID is not from the review agent; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          printf '%s' "$INFO" | jq -r '.title' > "$RUNNER_TEMP/pr_title.txt"
+          printf '%s' "$REVIEW" | jq -r --arg m "$MARKER" '.body | sub($m; "") | ltrimstr("\n\n")' \
+            > "$RUNNER_TEMP/review_body.txt"
+          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments" \
+            | jq -rs '[.[][]] | .[] | "- \(.path):\(.line // .original_line // "?"): \(.body)"' \
+            > "$RUNNER_TEMP/review_comments.txt"
+
+          {
+            echo "skip=false"
+            echo "head_ref=$HEAD_REF"
+            echo "default_branch=$DEFAULT_BRANCH"
+          } >> "$GITHUB_OUTPUT"
+
+      # Credentials are not left in .git/config, so Claude (step 4) can't push with them.
+      - name: Checkout PR branch
+        if: steps.pr.outputs.skip != 'true'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.pr.outputs.head_ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        if: steps.pr.outputs.skip != 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Claude Code CLI
+        if: steps.pr.outputs.skip != 'true'
+        run: npm install -g @anthropic-ai/claude-code
+
+      # No GitHub token in this step: the review text comes from an agent.
+      - name: Run Claude Code Agent
+        if: steps.pr.outputs.skip != 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          TITLE=$(cat "$RUNNER_TEMP/pr_title.txt")
+          REVIEW_BODY=$(cat "$RUNNER_TEMP/review_body.txt")
+          REVIEW_COMMENTS=$(cat "$RUNNER_TEMP/review_comments.txt")
+
+          PROMPT=$(cat <<EOF
+          You are an autonomous developer. A reviewer requested changes on pull request #$PR_NUMBER ("$TITLE"), which is checked out. Address the review.
+
+          Review:
+          $REVIEW_BODY
+
+          Line comments:
+          ${REVIEW_COMMENTS:-(none)}
+
+          Requirements:
+          1. Fix every point in the review. If a point is wrong, leave the code as is.
+          2. Ensure all tests pass.
+          3. Do not alter unneeded files.
+          4. Do not run git commit, git push or create pull requests; the workflow does that.
+          5. Do not modify anything under .github/; such changes are discarded.
+          EOF
+          )
+
+          claude -p "$PROMPT" \
+            --permission-mode acceptEdits \
+            --allowedTools "Read,Write,Edit,Glob,Grep,Bash" \
+            --max-turns 40
+
+      - name: Push changes and request a new review
+        if: steps.pr.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          DEFAULT_BRANCH: ${{ steps.pr.outputs.default_branch }}
+        run: |
+          set -euo pipefail
+
+          # GITHUB_TOKEN can't push workflow changes, and a review shouldn't rewrite
+          # the automation: drop anything Claude changed under .github/.
+          if [ -n "$(git status --porcelain -- .github)" ]; then
+            echo "::warning::Discarded Claude's changes under .github/:"
+            git status --porcelain -- .github
+            git checkout HEAD -- .github
+            git clean -fdq -- .github
+          fi
+
+          # Nothing changed? Re-reviewing the same code would loop, so hand over to a human.
+          if [ -z "$(git status --porcelain)" ]; then
+            gh label create needs-human --color D93F0B \
+              --description "The agents need a human to take over" 2>/dev/null || true
+            gh pr edit "$PR_NUMBER" --add-label needs-human
+            gh pr comment "$PR_NUMBER" \
+              --body "The fix agent made no changes for review $REVIEW_ID. A human needs to take over."
+            echo "::warning::Claude made no changes; PR labelled needs-human."
+            exit 0
+          fi
+
+          git config user.name "Claude Agent Bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          gh auth setup-git
+
+          git add -A
+          git commit -m "fix: address review $REVIEW_ID on PR #$PR_NUMBER"
+          git push origin "HEAD:$HEAD_REF"
+          echo "Pushed fixes to $HEAD_REF"
+
+          # Back to the review agent (pushes made with GITHUB_TOKEN don't trigger workflows)
+          gh workflow run claude-review.yml --ref "$DEFAULT_BRANCH" -f pr_number="$PR_NUMBER" \
+            || echo "::warning::Could not start the review agent."
