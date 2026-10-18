@@ -16,16 +16,24 @@ export default {
     const raw = await request.text();
     const signature = request.headers.get('linear-signature') || '';
     if (!(await validSignature(raw, signature, env.LINEAR_WEBHOOK_SECRET))) {
-      return new Response('Invalid signature', { status: 401 });
+      return reply(401, 'Invalid signature', {
+        hasSecret: Boolean(env.LINEAR_WEBHOOK_SECRET),
+        hasSignature: Boolean(signature),
+      });
     }
 
     const event = JSON.parse(raw);
     if (Math.abs(Date.now() - event.webhookTimestamp) > MAX_AGE_MS) {
-      return new Response('Stale webhook', { status: 401 });
+      return reply(401, 'Stale webhook', { ageMs: Date.now() - event.webhookTimestamp });
     }
 
     if (!shouldTrigger(event, (env.TRIGGER_LABEL || 'claude').toLowerCase())) {
-      return new Response('Ignored', { status: 200 });
+      return reply(200, 'Ignored', {
+        type: event.type,
+        action: event.action,
+        labels: (event.data && event.data.labels || []).map((l) => l.name),
+        updatedFrom: Object.keys(event.updatedFrom || {}),
+      });
     }
 
     const issue = event.data;
@@ -49,11 +57,17 @@ export default {
     });
 
     if (!res.ok) {
-      return new Response(`GitHub dispatch failed: ${res.status} ${await res.text()}`, { status: 502 });
+      return reply(502, `GitHub dispatch failed: ${res.status} ${await res.text()}`, { repo: env.GITHUB_REPO });
     }
-    return new Response('Dispatched', { status: 202 });
+    return reply(202, 'Dispatched', { issue: issue.identifier });
   },
 };
+
+// Logs the outcome (visible in `wrangler tail` and the dashboard) and responds.
+function reply(status, message, details = {}) {
+  console.log(JSON.stringify({ status, message, ...details }));
+  return new Response(message, { status });
+}
 
 function shouldTrigger(event, label) {
   if (event.type !== 'Issue') return false;
