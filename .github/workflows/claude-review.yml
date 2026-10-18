@@ -1,0 +1,196 @@
+name: Claude Review Agent
+run-name: Claude Review Agent (PR #${{ inputs.pr_number }})
+
+# Started explicitly (workflow_dispatch) by the dev-agent workflows, because events
+# caused by GITHUB_TOKEN (like a bot opening a PR) do not trigger other workflows.
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to review
+        required: true
+
+concurrency:
+  group: claude-review-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write    # labels
+      actions: write   # to dispatch the fix workflow after requesting changes
+    env:
+      GH_REPO: ${{ github.repository }}  # gh needs this before (and without) a checkout
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+      MAX_REVIEW_ROUNDS: '3'
+      MARKER: '<!-- claude-review-agent -->'
+
+    steps:
+      - name: Resolve PR and check limits
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          INFO=$(gh api "repos/$REPO/pulls/$PR_NUMBER")
+          HEAD_REF=$(printf '%s' "$INFO" | jq -r '.head.ref')
+          BASE_REF=$(printf '%s' "$INFO" | jq -r '.base.ref')
+          HEAD_REPO=$(printf '%s' "$INFO" | jq -r '.head.repo.full_name')
+          STATE=$(printf '%s' "$INFO" | jq -r '.state')
+          DEFAULT_BRANCH=$(gh api "repos/$REPO" --jq '.default_branch')
+
+          printf '%s' "$INFO" | jq -r '.title' > "$RUNNER_TEMP/pr_title.txt"
+          printf '%s' "$INFO" | jq -r '.body // ""' > "$RUNNER_TEMP/pr_body.txt"
+
+          # Only review open agent PRs from this repo
+          if [ "$STATE" != "open" ] || [[ "$HEAD_REF" != claude/* ]] || [ "$HEAD_REPO" != "$REPO" ]; then
+            echo "Skipping PR #$PR_NUMBER (state=$STATE, head=$HEAD_REF, repo=$HEAD_REPO)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Stop the agent-to-agent loop after N rounds and hand over to a human
+          ROUNDS=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+            | jq -s --arg m "$MARKER" '[.[][] | select((.body // "") | contains($m))] | length')
+          if [ "${ROUNDS:-0}" -ge "$MAX_REVIEW_ROUNDS" ]; then
+            gh label create needs-human --color D93F0B \
+              --description "The agents need a human to take over" 2>/dev/null || true
+            gh pr edit "$PR_NUMBER" --add-label needs-human
+            gh pr comment "$PR_NUMBER" \
+              --body "The review agent already reviewed this PR $ROUNDS times and is stopping. A human needs to take over."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "skip=false"
+            echo "head_ref=$HEAD_REF"
+            echo "base_ref=$BASE_REF"
+            echo "default_branch=$DEFAULT_BRANCH"
+          } >> "$GITHUB_OUTPUT"
+
+      # Credentials are not left in .git/config, so Claude (next steps) can't use them.
+      - name: Checkout PR branch
+        if: steps.pr.outputs.skip != 'true'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.pr.outputs.head_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        if: steps.pr.outputs.skip != 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Claude Code CLI
+        if: steps.pr.outputs.skip != 'true'
+        run: npm install -g @anthropic-ai/claude-code
+
+      # No GitHub token in this step: the diff and PR text come from an agent and an issue.
+      - name: Run Claude review agent
+        if: steps.pr.outputs.skip != 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          BASE_REF: ${{ steps.pr.outputs.base_ref }}
+        run: |
+          set -euo pipefail
+          TITLE=$(cat "$RUNNER_TEMP/pr_title.txt")
+          DESC=$(cat "$RUNNER_TEMP/pr_body.txt")
+
+          PROMPT=$(cat <<EOF
+          You are a senior code reviewer agent. Review pull request #$PR_NUMBER ("$TITLE") on branch $HEAD_REF against its base branch origin/$BASE_REF. You are read-only: do not edit any files.
+
+          PR description:
+          $DESC
+
+          How to review:
+          1. Run: git diff origin/$BASE_REF...HEAD to see the change, and read surrounding code as needed.
+          2. Check: does it do what the PR and task describe, correctness and edge cases, meaningful tests, security problems, and unrelated or unneeded changes.
+          3. Skip pure style nitpicks.
+
+          Output: print ONE JSON object between the markers below, and nothing after the closing marker.
+          <<<REVIEW_JSON
+          {"verdict": "approve or request_changes", "summary": "overall assessment", "comments": [{"path": "src/file.js", "line": 12, "body": "what to fix and why"}]}
+          REVIEW_JSON>>>
+          Use "request_changes" only for real problems (bugs, missing tests, security, scope creep). Each "line" must be a line number in the new version of the file that appears in the diff. Use an empty comments array if nothing is line-specific.
+          EOF
+          )
+
+          claude -p "$PROMPT" \
+            --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*)" \
+            --max-turns 30 | tee "$RUNNER_TEMP/claude-review-output.txt"
+
+      - name: Post review
+        if: steps.pr.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BRANCH: ${{ steps.pr.outputs.default_branch }}
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/claude-review-output.txt"
+
+          # Take the last JSON block between the markers
+          JSON=$(awk '/<<<REVIEW_JSON/{buf="";inb=1;next} /REVIEW_JSON>>>/{inb=0;last=buf;next} inb{buf=buf $0 "\n"} END{printf "%s", last}' "$OUT")
+
+          if ! printf '%s' "$JSON" | jq -e '.verdict and .summary' > /dev/null 2>&1; then
+            gh label create needs-human --color D93F0B \
+              --description "The agents need a human to take over" 2>/dev/null || true
+            gh pr edit "$PR_NUMBER" --add-label needs-human
+            gh pr comment "$PR_NUMBER" \
+              --body "The review agent could not produce a structured review. A human should look at this PR."
+            echo "::warning::Review output was not valid JSON."
+            exit 0
+          fi
+
+          VERDICT=$(printf '%s' "$JSON" | jq -r '.verdict')
+          SUMMARY=$(printf '%s' "$JSON" | jq -r '.summary')
+          COMMENTS=$(printf '%s' "$JSON" | jq -c '(.comments // []) | map(select(.path and .line and .body) | {path, line: (.line | tonumber), side: "RIGHT", body})')
+          EXTRA=$(printf '%s' "$JSON" | jq -r '(.comments // [])[] | "- `\(.path):\(.line)`: \(.body)"')
+
+          # Always a plain COMMENT review: GitHub rejects REQUEST_CHANGES/APPROVE from the same
+          # bot that opened the PR, and a bot approval must never satisfy branch protection.
+          # The verdict is carried by the review text and by the hand-off below.
+          EVENT="COMMENT"
+          if [ "$VERDICT" = "request_changes" ]; then
+            LABEL="changes requested"
+          else
+            LABEL="approved, ready for human review"
+          fi
+          BODY=$(printf '%s\n\n**Review agent: %s**\n\n%s' "$MARKER" "$LABEL" "$SUMMARY")
+
+          payload() {
+            jq -n --arg event "$EVENT" --arg body "$BODY" --argjson comments "$COMMENTS" \
+              '{event: $event, body: $body} + (if ($comments | length) > 0 then {comments: $comments} else {} end)'
+          }
+
+          # If an inline comment points at a line GitHub rejects, retry with the comments in the body
+          if ! RESP=$(payload | gh api -X POST "repos/$REPO/pulls/$PR_NUMBER/reviews" --input - 2> "$RUNNER_TEMP/review-err.txt"); then
+            echo "::warning::Review with inline comments failed: $(cat "$RUNNER_TEMP/review-err.txt")"
+            COMMENTS='[]'
+            if [ -n "$EXTRA" ]; then
+              BODY=$(printf '%s\n\n%s' "$BODY" "$EXTRA")
+            fi
+            RESP=$(payload | gh api -X POST "repos/$REPO/pulls/$PR_NUMBER/reviews" --input -)
+          fi
+          REVIEW_ID=$(printf '%s' "$RESP" | jq -r '.id')
+          echo "Posted review $REVIEW_ID ($EVENT)"
+
+          if [ "$VERDICT" = "request_changes" ]; then
+            # Loop back to the dev agent: reviews made with GITHUB_TOKEN do not trigger workflows
+            gh workflow run claude-pr-changes.yml --ref "$DEFAULT_BRANCH" \
+              -f pr_number="$PR_NUMBER" -f review_id="$REVIEW_ID" \
+              || echo "::warning::Could not start the fix agent (claude-pr-changes.yml)."
+          else
+            gh label create agent-approved --color 0E8A16 \
+              --description "Approved by the review agent, waiting for a human" 2>/dev/null || true
+            gh pr edit "$PR_NUMBER" --add-label agent-approved
+          fi
