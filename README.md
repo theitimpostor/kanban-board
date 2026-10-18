@@ -5,25 +5,34 @@ A small Kanban board you run locally. No dependencies: just Node.js (16+).
 ## Run
 
 ```bash
-node server.js
+node server.js   # or: npm start
 ```
 
 Then open http://localhost:3000.
 
-Use another port with `PORT=4000 node server.js`.
+Environment variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` | `3000` | Port to listen on, e.g. `PORT=4000 node server.js` |
+| `DATA_FILE` | `data.json` next to `server.js` | Where the board is saved |
 
 ## Features
 
 - Columns: add, rename (click the title), delete, drag the header to reorder
 - Cards: add, edit title/description/color label, delete, drag within and between columns
+- Keyboard: Enter/Space opens a focused card, Enter saves, Escape cancels
 - Filter cards by text
 - Light and dark mode (follows your system)
-- Everything is saved to `data.json` next to `server.js`. Delete that file to reset the board.
+- Everything is saved to `data.json` (or `DATA_FILE`) and is git-ignored. Delete that file to reset
+  the board to the starter columns *To Do*, *In Progress* and *Done*.
 
 ## Structure
 
 - `server.js` — HTTP server: REST API under `/api` plus static files
 - `public/` — the frontend (plain HTML, CSS and JavaScript)
+- `linear-relay/` — Cloudflare Worker that forwards Linear webhooks to GitHub (see [Automation](#automation))
+- `.github/workflows/linear-claude.yml` — the workflow that runs Claude Code on a Linear issue
 
 ## API
 
@@ -41,6 +50,13 @@ Use another port with `PORT=4000 node server.js`.
 
 Labels: `none`, `red`, `orange`, `yellow`, `green`, `blue`, `purple`.
 
+Limits: column titles up to 100 characters, card titles up to 200, descriptions up to 5000.
+`index` is clamped to a valid position; leave it out to append at the end.
+
+Responses are JSON. Creating a column or card returns it with `201`; the `move` endpoints return
+the whole board; `DELETE` returns `204`. Errors return `{ "error": "..." }` with `400` (invalid input),
+`404` (unknown id) or `413` (body over 1 MB).
+
 ## Automation
 
 Add the `claude` label to a Linear issue (or create an issue with it) and Claude Code implements it:
@@ -50,7 +66,10 @@ Linear webhook ──▶ linear-relay/ (Cloudflare Worker) ──▶ repository_
                    checks signature, filters label                               Claude → PR → Linear comment + status
 ```
 
+The relay verifies the Linear signature, rejects webhooks older than 60 seconds, and only fires when
+an issue is created with the label or the label is added to an existing issue.
 The workflow opens a pull request, comments the PR link on the issue and moves it to *In Review*.
+Relay logs are available with `npx wrangler tail` (run in `linear-relay/`).
 
 ### Setup
 
