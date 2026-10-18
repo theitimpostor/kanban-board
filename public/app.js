@@ -1,4 +1,5 @@
 const LABELS = ['none', 'red', 'orange', 'yellow', 'green', 'blue', 'purple'];
+const PRIORITIES = ['none', 'low', 'medium', 'high', 'urgent'];
 
 const boardEl = document.getElementById('board');
 const searchEl = document.getElementById('search');
@@ -119,6 +120,7 @@ function countCardsBefore(node) {
 }
 
 function renderCard(card) {
+  const priority = card.priority || 'none';
   const cardEl = el('li', {
     class: 'card',
     draggable: 'true',
@@ -129,6 +131,7 @@ function renderCard(card) {
   },
     card.label !== 'none' ? el('div', { class: 'label-bar', style: `background: var(--label-${card.label})` }) : null,
     el('div', { class: 'title' }, card.title),
+    priority !== 'none' ? el('span', { class: `priority-badge priority-${priority}`, title: `Priority: ${priority}` }, priority) : null,
     card.description ? el('div', { class: 'desc-hint' }, '☰ Has description') : null,
   );
 
@@ -297,6 +300,9 @@ labelOptions.append(...LABELS.map((label) =>
   ),
 ));
 
+const prioritySelect = cardForm.priority;
+prioritySelect.append(...PRIORITIES.map((p) => el('option', { value: p }, p === 'none' ? 'No priority' : p[0].toUpperCase() + p.slice(1))));
+
 function findCard(id) {
   for (const column of board.columns) {
     const card = column.cards.find((c) => c.id === id);
@@ -313,6 +319,7 @@ function openCardDialog(id) {
   cardForm.title.value = card.title;
   cardForm.description.value = card.description;
   cardForm.querySelector(`input[name="label"][value="${card.label}"]`).checked = true;
+  prioritySelect.value = card.priority || 'none';
   document.getElementById('card-meta').textContent =
     `In "${column.title}" · created ${new Date(card.createdAt).toLocaleString()}`;
   dialog.showModal();
@@ -328,6 +335,7 @@ cardForm.addEventListener('submit', (e) => {
     title,
     description: cardForm.description.value,
     label: cardForm.label.value,
+    priority: prioritySelect.value,
   });
 });
 

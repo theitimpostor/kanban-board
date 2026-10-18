@@ -15,7 +15,7 @@ Use another port with `PORT=4000 node server.js`.
 ## Features
 
 - Columns: add, rename (click the title), delete, drag the header to reorder
-- Cards: add, edit title/description/color label, delete, drag within and between columns
+- Cards: add, edit title/description/color label/priority, delete, drag within and between columns
 - Filter cards by text
 - Light and dark mode (follows your system)
 - Everything is saved to `data.json` next to `server.js`. Delete that file to reset the board.
@@ -34,12 +34,14 @@ Use another port with `PORT=4000 node server.js`.
 | PATCH | `/api/columns/:id` | `{ title }` |
 | DELETE | `/api/columns/:id` | |
 | POST | `/api/columns/:id/move` | `{ index }` |
-| POST | `/api/columns/:id/cards` | `{ title, description?, label? }` |
-| PATCH | `/api/cards/:id` | `{ title?, description?, label? }` |
+| POST | `/api/columns/:id/cards` | `{ title, description?, label?, priority? }` |
+| PATCH | `/api/cards/:id` | `{ title?, description?, label?, priority? }` |
 | DELETE | `/api/cards/:id` | |
 | POST | `/api/cards/:id/move` | `{ columnId, index }` |
 
 Labels: `none`, `red`, `orange`, `yellow`, `green`, `blue`, `purple`.
+
+Priorities: `none`, `low`, `medium`, `high`, `urgent`.
 
 ## Automation
 
