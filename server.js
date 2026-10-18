@@ -9,13 +9,14 @@ const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const LABELS = ['none', 'red', 'orange', 'yellow', 'green', 'blue', 'purple'];
+const PRIORITIES = ['none', 'low', 'medium', 'high'];
 
 // ---------- Persistence ----------
 
 function defaultBoard() {
   const col = (title, cards) => ({ id: newId(), title, cards });
   const card = (title, description = '', label = 'none') => ({
-    id: newId(), title, description, label, createdAt: new Date().toISOString(),
+    id: newId(), title, description, label, priority: 'none', createdAt: new Date().toISOString(),
   });
   return {
     columns: [
@@ -91,6 +92,12 @@ function cleanLabel(value) {
   return value;
 }
 
+function cleanPriority(value) {
+  if (value === undefined) return undefined;
+  if (PRIORITIES.indexOf(value) < 1) throw new HttpError(400, `"priority" must be one of ${PRIORITIES.join(', ')}`);
+  return value;
+}
+
 function clampIndex(index, length) {
   const n = Number.isInteger(index) ? index : length;
   return Math.max(0, Math.min(n, length));
@@ -152,6 +159,7 @@ const routes = [
       title: cleanText(body.title, 'title', { required: true, max: 200 }),
       description: cleanText(body.description, 'description', { max: 5000 }) || '',
       label: cleanLabel(body.label) || 'none',
+      priority: cleanPriority(body.priority) || 'none',
       createdAt: new Date().toISOString(),
     };
     column.cards.push(card);
@@ -163,9 +171,11 @@ const routes = [
     const title = cleanText(body.title, 'title', { required: body.title !== undefined, max: 200 });
     const description = cleanText(body.description, 'description', { max: 5000 });
     const label = cleanLabel(body.label);
+    const priority = cleanPriority(body.priority);
     if (title !== undefined) card.title = title;
     if (description !== undefined) card.description = description;
     if (label !== undefined) card.label = label;
+    if (priority !== undefined) card.priority = priority;
     return card;
   }],
 
