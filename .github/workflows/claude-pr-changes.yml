@@ -1,5 +1,5 @@
 name: Claude PR Changes Agent
-run-name: Claude PR Changes Agent (PR #${{ inputs.pr_number }})
+run-name: 'Claude PR Changes Agent (PR #${{ inputs.pr_number }})'
 
 # Started explicitly (workflow_dispatch) by claude-review.yml when the review agent
 # requests changes, because reviews made with GITHUB_TOKEN do not trigger workflows.
