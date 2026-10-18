@@ -36,7 +36,12 @@ function newId() {
 
 function load() {
   try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    const board = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    // Cards saved before priorities existed have no priority field.
+    for (const column of board.columns) {
+      for (const card of column.cards) card.priority ??= 'none';
+    }
+    return board;
   } catch (err) {
     if (err.code !== 'ENOENT') console.error('Could not read data file, starting fresh:', err.message);
     const board = defaultBoard();

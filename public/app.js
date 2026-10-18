@@ -318,7 +318,7 @@ function openCardDialog(id) {
   cardForm.title.value = card.title;
   cardForm.description.value = card.description;
   cardForm.querySelector(`input[name="label"][value="${card.label}"]`).checked = true;
-  cardForm.priority.value = card.priority;
+  cardForm.priority.value = card.priority || 'none';
   document.getElementById('card-meta').textContent =
     `In "${column.title}" · created ${new Date(card.createdAt).toLocaleString()}`;
   dialog.showModal();
