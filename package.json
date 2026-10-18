@@ -1,5 +1,5 @@
 {
-  "name": "kanban",
+  "name": "kanban-board",
   "version": "1.0.0",
   "description": "A simple local Kanban board with zero dependencies",
   "private": true,

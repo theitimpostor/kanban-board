@@ -1,0 +1,11 @@
+name = "kanban-linear-relay"
+main = "worker.mjs"
+compatibility_date = "2026-10-01"
+
+[vars]
+GITHUB_REPO = "theitimpostor/kanban-board"
+TRIGGER_LABEL = "claude"
+
+# Secrets (set with `npx wrangler secret put <NAME>`):
+#   LINEAR_WEBHOOK_SECRET  signing secret from the Linear webhook settings
+#   GITHUB_TOKEN           fine-grained PAT for theitimpostor/kanban-board with Contents: read & write
