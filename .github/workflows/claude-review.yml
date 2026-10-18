@@ -1,5 +1,5 @@
 name: Claude Review Agent
-run-name: Claude Review Agent (PR #${{ inputs.pr_number }})
+run-name: 'Claude Review Agent (PR #${{ inputs.pr_number }})'
 
 # Started explicitly (workflow_dispatch) by the dev-agent workflows, because events
 # caused by GITHUB_TOKEN (like a bot opening a PR) do not trigger other workflows.
