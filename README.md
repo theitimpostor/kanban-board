@@ -45,7 +45,7 @@ Labels: `none`, `red`, `orange`, `yellow`, `green`, `blue`, `purple`.
 
 `.github/workflows/implement-linear-issue.yml` implements a Linear issue with the Claude Code CLI, opens a pull request, comments the PR link on the issue and moves the issue to **In Review**. If a run fails, it comments a link to the run on the issue instead.
 
-**Trigger.** The Linear webhook relay sends a `repository_dispatch` event (it needs a GitHub token that can write the repo's contents):
+**Trigger.** Add the `claude` label to a Linear issue. The Cloudflare Worker in [`relay/`](relay/README.md) receives Linear's webhook, verifies it and sends a `repository_dispatch` event, the same request as:
 
 ```bash
 curl -X POST https://api.github.com/repos/theitimpostor/kanban-board/dispatches \
