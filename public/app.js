@@ -129,6 +129,7 @@ function renderCard(card) {
   },
     card.label !== 'none' ? el('div', { class: 'label-bar', style: `background: var(--label-${card.label})` }) : null,
     el('div', { class: 'title' }, card.title),
+    card.priority !== 'none' ? el('span', { class: `priority priority-${card.priority}` }, card.priority) : null,
     card.description ? el('div', { class: 'desc-hint' }, '☰ Has description') : null,
   );
 
@@ -313,6 +314,7 @@ function openCardDialog(id) {
   cardForm.title.value = card.title;
   cardForm.description.value = card.description;
   cardForm.querySelector(`input[name="label"][value="${card.label}"]`).checked = true;
+  cardForm.priority.value = card.priority;
   document.getElementById('card-meta').textContent =
     `In "${column.title}" · created ${new Date(card.createdAt).toLocaleString()}`;
   dialog.showModal();
@@ -328,6 +330,7 @@ cardForm.addEventListener('submit', (e) => {
     title,
     description: cardForm.description.value,
     label: cardForm.label.value,
+    priority: cardForm.priority.value,
   });
 });
 

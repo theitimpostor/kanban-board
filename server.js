@@ -9,18 +9,19 @@ const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const LABELS = ['none', 'red', 'orange', 'yellow', 'green', 'blue', 'purple'];
+const PRIORITIES = ['none', 'low', 'medium', 'high', 'urgent'];
 
 // ---------- Persistence ----------
 
 function defaultBoard() {
   const col = (title, cards) => ({ id: newId(), title, cards });
-  const card = (title, description = '', label = 'none') => ({
-    id: newId(), title, description, label, createdAt: new Date().toISOString(),
+  const card = (title, description = '', label = 'none', priority = 'none') => ({
+    id: newId(), title, description, label, priority, createdAt: new Date().toISOString(),
   });
   return {
     columns: [
       col('To Do', [
-        card('Welcome to your board', 'Drag cards between columns. Click a card to edit it.', 'blue'),
+        card('Welcome to your board', 'Drag cards between columns. Click a card to edit it.', 'blue', 'high'),
         card('Add a new column', 'Use the "+ Add column" button on the right.'),
       ]),
       col('In Progress', [card('Try dragging me', 'Drop me into "Done".', 'orange')]),
@@ -52,6 +53,11 @@ function save(b) {
 }
 
 let board = load();
+
+// Cards saved before priorities existed get the default.
+for (const column of board.columns) {
+  for (const card of column.cards) if (!PRIORITIES.includes(card.priority)) card.priority = 'none';
+}
 
 // ---------- Helpers ----------
 
@@ -88,6 +94,12 @@ function cleanText(value, field, { required = false, max = 500 } = {}) {
 function cleanLabel(value) {
   if (value === undefined) return undefined;
   if (!LABELS.includes(value)) throw new HttpError(400, `"label" must be one of ${LABELS.join(', ')}`);
+  return value;
+}
+
+function cleanPriority(value) {
+  if (value === undefined) return undefined;
+  if (!PRIORITIES.includes(value)) throw new HttpError(400, `"priority" must be one of ${PRIORITIES.join(', ')}`);
   return value;
 }
 
@@ -152,6 +164,7 @@ const routes = [
       title: cleanText(body.title, 'title', { required: true, max: 200 }),
       description: cleanText(body.description, 'description', { max: 5000 }) || '',
       label: cleanLabel(body.label) || 'none',
+      priority: cleanPriority(body.priority) || 'none',
       createdAt: new Date().toISOString(),
     };
     column.cards.push(card);
@@ -163,9 +176,11 @@ const routes = [
     const title = cleanText(body.title, 'title', { required: body.title !== undefined, max: 200 });
     const description = cleanText(body.description, 'description', { max: 5000 });
     const label = cleanLabel(body.label);
+    const priority = cleanPriority(body.priority);
     if (title !== undefined) card.title = title;
     if (description !== undefined) card.description = description;
     if (label !== undefined) card.label = label;
+    if (priority !== undefined) card.priority = priority;
     return card;
   }],
 
