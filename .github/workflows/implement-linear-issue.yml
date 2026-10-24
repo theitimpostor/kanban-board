@@ -25,6 +25,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write # start the review agent
 
 concurrency:
   group: linear-issue-${{ github.event.client_payload.issue_id || inputs.issue_id }}
@@ -46,6 +47,11 @@ jobs:
           # Keep the GitHub token out of .git/config so Claude's step cannot use it.
           persist-credentials: false
 
+      # Later steps run these copies: Claude edits the checkout, and the issue text
+      # it works from must not be able to change scripts that run with secrets.
+      - name: Copy automation scripts
+        run: cp -R .github/scripts "$RUNNER_TEMP/scripts"
+
       - name: Set up Node.js
         uses: actions/setup-node@v5
         with:
@@ -64,7 +70,7 @@ jobs:
             echo "::error::Invalid issue ID: $ISSUE_ID"
             exit 1
           fi
-          .github/scripts/linear.sh get-issue "$ISSUE_ID" > "$RUNNER_TEMP/issue.json"
+          "$RUNNER_TEMP/scripts/linear.sh" get-issue "$ISSUE_ID" > "$RUNNER_TEMP/issue.json"
 
           identifier=$(jq -r '.identifier' "$RUNNER_TEMP/issue.json")
           # Prefer Linear's suggested branch name, restricted to safe characters.
@@ -123,35 +129,9 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          output="$RUNNER_TEMP/claude.json"
-          # Errors (bad API key, unknown model, turn limit) are written to the JSON
-          # output, not stderr, so capture the exit code instead of stopping here.
-          if claude -p \
-            --model "$CLAUDE_MODEL" \
-            --max-turns "$CLAUDE_MAX_TURNS" \
-            --output-format json \
-            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(node:*),Bash(npm:*),Bash(ls:*),Bash(cat:*)" \
-            < "$RUNNER_TEMP/prompt.md" > "$output"; then
-            status=0
-          else
-            status=$?
-          fi
-
-          if [[ $status -ne 0 ]] || ! jq -e '.is_error == false' "$output" >/dev/null 2>&1; then
-            # The output can echo issue text, so stop it from running workflow commands.
-            token=$(openssl rand -hex 16)
-            echo "::group::Claude Code output"
-            echo "::stop-commands::$token"
-            cat "$output"
-            echo "::$token::"
-            echo "::endgroup::"
-            # subtype is "success" even for errors like a bad API key, so leave it out then.
-            reason=$(jq -r '[(.subtype | select(. != "success")), .result] | map(select(. != null and . != "")) | join(": ")' \
-              "$output" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//' | cut -c1-500)
-            echo "::error::Claude Code failed (exit code $status): ${reason:-no JSON output, see the Claude Code output group above}"
-            exit 1
-          fi
-          jq -r '.result // empty' "$output" > "$RUNNER_TEMP/summary.md"
+          "$RUNNER_TEMP/scripts/run-claude.sh" "$RUNNER_TEMP/prompt.md" "$RUNNER_TEMP/claude.json" \
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(node:*),Bash(npm:*),Bash(ls:*),Bash(cat:*)"
+          jq -r '.result // empty' "$RUNNER_TEMP/claude.json" > "$RUNNER_TEMP/summary.md"
 
       - name: Commit, push and open pull request
         id: pr
@@ -160,6 +140,13 @@ jobs:
           BRANCH: ${{ steps.issue.outputs.branch }}
           IDENTIFIER: ${{ steps.issue.outputs.identifier }}
         run: |
+          # GITHUB_TOKEN can't push workflow changes, and an issue shouldn't change the automation.
+          if [[ -n "$(git status --porcelain -- .github)" ]]; then
+            echo "::warning::Discarding Claude's changes under .github/."
+            git checkout HEAD -- .github
+            git clean -fdq -- .github
+          fi
+
           if [[ -z "$(git status --porcelain)" ]]; then
             echo "::error::Claude Code made no changes."
             exit 1
@@ -195,8 +182,18 @@ jobs:
           PR_URL: ${{ steps.pr.outputs.url }}
         run: |
           printf 'Claude Code opened a pull request: %s\n' "$PR_URL" > "$RUNNER_TEMP/comment.md"
-          .github/scripts/linear.sh comment "$ISSUE_UUID" "$RUNNER_TEMP/comment.md"
-          .github/scripts/linear.sh set-state "$ISSUE_UUID" "$REVIEW_STATE"
+          "$RUNNER_TEMP/scripts/linear.sh" comment "$ISSUE_UUID" "$RUNNER_TEMP/comment.md"
+          "$RUNNER_TEMP/scripts/linear.sh" set-state "$ISSUE_UUID" "$REVIEW_STATE"
+
+      # PRs opened with GITHUB_TOKEN don't trigger workflows, so start the review agent
+      # directly, even if updating Linear failed. A failure here is only a warning.
+      - name: Start review agent
+        if: always() && steps.pr.outputs.url != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: gh workflow run claude-review.yml --ref "$GITHUB_REF_NAME" -f pr_number="${PR_URL##*/}"
 
       - name: Report failure to Linear
         if: failure() && steps.issue.outputs.id != ''
@@ -206,4 +203,4 @@ jobs:
         run: |
           printf 'Claude Code could not implement this issue. See the [workflow run](%s).\n' \
             "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$RUNNER_TEMP/comment.md"
-          .github/scripts/linear.sh comment "$ISSUE_UUID" "$RUNNER_TEMP/comment.md"
+          "$RUNNER_TEMP/scripts/linear.sh" comment "$ISSUE_UUID" "$RUNNER_TEMP/comment.md"

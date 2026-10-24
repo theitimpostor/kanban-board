@@ -58,3 +58,15 @@ curl -X POST https://api.github.com/repos/theitimpostor/kanban-board/dispatches 
 **Secrets.** `ANTHROPIC_API_KEY` and `LINEAR_API_KEY` (a Linear personal API key).
 
 **Settings.** The model, turn limit and target state name (`REVIEW_STATE`) are in the workflow's `env` block. Under *Settings → Actions → General*, allow GitHub Actions to create pull requests.
+
+### Review and fix agents
+
+After opening a PR, the developer agent starts the **review agent** (`.github/workflows/claude-review.yml`). Claude reviews the PR read-only (it only has the Read, Glob and Grep tools) and posts a review with inline comments.
+
+- **Approved:** the PR gets the `agent-approved` label. A human still merges it.
+- **Changes requested:** the **fix agent** (`.github/workflows/claude-fix.yml`) addresses the review, pushes to the PR branch, comments what it changed and starts the review agent again.
+- **Still changes requested after 3 rounds** (`MAX_REVIEW_ROUNDS`), or an agent fails or makes no changes: the PR gets the `needs-human` label and a comment, and the agents stop.
+
+Reviews are posted as comments, not approvals: GitHub doesn't let the bot that opened a PR approve it, and a bot approval shouldn't count toward merging. To review an agent PR again, run the review agent from the Actions tab with the PR number. The agents only act on open PRs that the developer agent opened in this repository.
+
+Helper scripts live in `.github/scripts/`. Test the review parser with `node --test .github/scripts/review.test.mjs`.
