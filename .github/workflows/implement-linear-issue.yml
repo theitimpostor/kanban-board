@@ -56,6 +56,7 @@ jobs:
         env:
           ISSUE_ID: ${{ github.event.client_payload.issue_id || inputs.issue_id }}
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [[ ! "$ISSUE_ID" =~ ^[A-Za-z0-9-]+$ ]]; then
             echo "::error::Invalid issue ID: $ISSUE_ID"
@@ -69,9 +70,18 @@ jobs:
             | tr -c 'A-Za-z0-9/._-' '-' | sed -E 's/-+/-/g; s/^[-/.]+//; s/[-/.]+$//')
           branch=${branch:-linear/${identifier,,}}
 
-          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+          # The checkout keeps no credentials, so pass the token explicitly.
+          # ls-remote exits 0 if the branch exists, 2 if it doesn't, anything else on error.
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$remote" "$branch" >/dev/null; then
             echo "::error::Branch $branch already exists. Delete it or finish its pull request first."
             exit 1
+          else
+            status=$?
+            if [[ $status -ne 2 ]]; then
+              echo "::error::Could not check whether branch $branch exists (git ls-remote exit code $status)."
+              exit 1
+            fi
           fi
 
           {
@@ -109,17 +119,35 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          claude -p \
+          output="$RUNNER_TEMP/claude.json"
+          # Errors (bad API key, unknown model, turn limit) are written to the JSON
+          # output, not stderr, so capture the exit code instead of stopping here.
+          if claude -p \
             --model "$CLAUDE_MODEL" \
             --max-turns "$CLAUDE_MAX_TURNS" \
             --output-format json \
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(node:*),Bash(npm:*),Bash(ls:*),Bash(cat:*)" \
-            < "$RUNNER_TEMP/prompt.md" > "$RUNNER_TEMP/claude.json"
-          jq -r '.result // empty' "$RUNNER_TEMP/claude.json" > "$RUNNER_TEMP/summary.md"
-          if jq -e '.is_error' "$RUNNER_TEMP/claude.json" >/dev/null; then
-            echo "::error::Claude Code did not finish: $(jq -r '.subtype' "$RUNNER_TEMP/claude.json")"
+            < "$RUNNER_TEMP/prompt.md" > "$output"; then
+            status=0
+          else
+            status=$?
+          fi
+
+          if [[ $status -ne 0 ]] || ! jq -e '.is_error == false' "$output" >/dev/null 2>&1; then
+            # The output can echo issue text, so stop it from running workflow commands.
+            token=$(openssl rand -hex 16)
+            echo "::group::Claude Code output"
+            echo "::stop-commands::$token"
+            cat "$output"
+            echo "::$token::"
+            echo "::endgroup::"
+            # subtype is "success" even for errors like a bad API key, so leave it out then.
+            reason=$(jq -r '[(.subtype | select(. != "success")), .result] | map(select(. != null and . != "")) | join(": ")' \
+              "$output" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//' | cut -c1-500)
+            echo "::error::Claude Code failed (exit code $status): ${reason:-no JSON output, see the Claude Code output group above}"
             exit 1
           fi
+          jq -r '.result // empty' "$output" > "$RUNNER_TEMP/summary.md"
 
       - name: Commit, push and open pull request
         id: pr
