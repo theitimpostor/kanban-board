@@ -41,15 +41,17 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # Keep the GitHub token out of .git/config so Claude's step cannot use it.
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          # Claude Code needs Node.js 22+. On older Node, npm quietly installs an
+          # old release that rejects newer models.
+          node-version: 22
 
       - name: Fetch Linear issue
         id: issue
@@ -113,7 +115,9 @@ jobs:
           EOF
 
       - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
+        run: |
+          npm install -g @anthropic-ai/claude-code@latest
+          claude --version
 
       - name: Run Claude Code
         env:
