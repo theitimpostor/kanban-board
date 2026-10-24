@@ -3,3 +3,5 @@ node_modules/
 data.json
 data.json.tmp
 .DS_Store
+.wrangler/
+.dev.vars
