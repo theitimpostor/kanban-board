@@ -1,0 +1,15 @@
+name = "linear-claude-relay"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# Keep request logs in the Cloudflare dashboard too, not only in `wrangler tail`.
+[observability]
+enabled = true
+
+[vars]
+GITHUB_REPO = "theitimpostor/kanban-board"
+TRIGGER_LABEL = "claude"
+
+# Secrets, set with `npx wrangler secret put <NAME>`:
+#   LINEAR_WEBHOOK_SECRET  signing secret of the Linear webhook
+#   GITHUB_TOKEN           fine-grained token with Contents: read and write on GITHUB_REPO
