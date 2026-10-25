@@ -9,13 +9,17 @@ const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const LABELS = ['none', 'red', 'orange', 'yellow', 'green', 'blue', 'purple'];
+const HISTORY_LIMIT = 100; // per card; the oldest entries are dropped first
 
 // ---------- Persistence ----------
 
 function defaultBoard() {
-  const col = (title, cards) => ({ id: newId(), title, cards });
+  const col = (title, cards) => {
+    cards.forEach((c) => addHistory(c, { type: 'created', column: title }));
+    return { id: newId(), title, cards };
+  };
   const card = (title, description = '', label = 'none') => ({
-    id: newId(), title, description, label, createdAt: new Date().toISOString(),
+    id: newId(), title, description, label, createdAt: new Date().toISOString(), history: [],
   });
   return {
     columns: [
@@ -49,6 +53,14 @@ function save(b) {
   const tmp = DATA_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(b, null, 2));
   fs.renameSync(tmp, DATA_FILE);
+}
+
+// Appends an entry such as { type: 'moved', from: 'To Do', to: 'Done' } to a card's history.
+// Cards saved before history existed have no "history" array, so create it on first use.
+function addHistory(card, entry) {
+  if (!Array.isArray(card.history)) card.history = [];
+  card.history.push({ at: new Date().toISOString(), ...entry });
+  if (card.history.length > HISTORY_LIMIT) card.history.splice(0, card.history.length - HISTORY_LIMIT);
 }
 
 let board = load();
@@ -153,7 +165,9 @@ const routes = [
       description: cleanText(body.description, 'description', { max: 5000 }) || '',
       label: cleanLabel(body.label) || 'none',
       createdAt: new Date().toISOString(),
+      history: [],
     };
+    addHistory(card, { type: 'created', column: column.title });
     column.cards.push(card);
     return card;
   }],
@@ -163,9 +177,15 @@ const routes = [
     const title = cleanText(body.title, 'title', { required: body.title !== undefined, max: 200 });
     const description = cleanText(body.description, 'description', { max: 5000 });
     const label = cleanLabel(body.label);
+    // Only record fields that actually changed. Descriptions can be long, so just note that one changed.
+    const changes = {};
+    if (title !== undefined && title !== card.title) changes.title = { from: card.title, to: title };
+    if (description !== undefined && description !== card.description) changes.description = true;
+    if (label !== undefined && label !== card.label) changes.label = { from: card.label, to: label };
     if (title !== undefined) card.title = title;
     if (description !== undefined) card.description = description;
     if (label !== undefined) card.label = label;
+    if (Object.keys(changes).length) addHistory(card, { type: 'edited', changes });
     return card;
   }],
 
@@ -179,6 +199,7 @@ const routes = [
     const { column, index, card } = findCard(id);
     column.cards.splice(index, 1);
     target.cards.splice(clampIndex(body.index, target.cards.length), 0, card);
+    if (target !== column) addHistory(card, { type: 'moved', from: column.title, to: target.title });
     return board;
   }],
 ];
