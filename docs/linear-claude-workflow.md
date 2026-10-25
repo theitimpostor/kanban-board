@@ -18,7 +18,8 @@ log link on the issue instead.
 
 ## Triggering
 
-The webhook relay sends a `repository_dispatch` event:
+Adding the `claude` label to a Linear issue starts the workflow through the Cloudflare
+Worker in [`relay/`](../relay/README.md), which sends a `repository_dispatch` event:
 
 ```http
 POST https://api.github.com/repos/{owner}/{repo}/dispatches
