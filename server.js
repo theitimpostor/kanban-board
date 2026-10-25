@@ -9,13 +9,14 @@ const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const LABELS = ['none', 'red', 'orange', 'yellow', 'green', 'blue', 'purple'];
+const HISTORY_LIMIT = 50;
 
 // ---------- Persistence ----------
 
 function defaultBoard() {
   const col = (title, cards) => ({ id: newId(), title, cards });
   const card = (title, description = '', label = 'none') => ({
-    id: newId(), title, description, label, createdAt: new Date().toISOString(),
+    id: newId(), title, description, label, createdAt: new Date().toISOString(), history: [],
   });
   return {
     columns: [
@@ -91,6 +92,13 @@ function cleanLabel(value) {
   return value;
 }
 
+// Appends an entry to a card's history, keeping only the most recent HISTORY_LIMIT entries.
+function addHistory(card, entry) {
+  if (!Array.isArray(card.history)) card.history = [];
+  card.history.push({ at: new Date().toISOString(), ...entry });
+  if (card.history.length > HISTORY_LIMIT) card.history.splice(0, card.history.length - HISTORY_LIMIT);
+}
+
 function clampIndex(index, length) {
   const n = Number.isInteger(index) ? index : length;
   return Math.max(0, Math.min(n, length));
@@ -153,7 +161,9 @@ const routes = [
       description: cleanText(body.description, 'description', { max: 5000 }) || '',
       label: cleanLabel(body.label) || 'none',
       createdAt: new Date().toISOString(),
+      history: [],
     };
+    addHistory(card, { type: 'created', column: column.title });
     column.cards.push(card);
     return card;
   }],
@@ -163,9 +173,12 @@ const routes = [
     const title = cleanText(body.title, 'title', { required: body.title !== undefined, max: 200 });
     const description = cleanText(body.description, 'description', { max: 5000 });
     const label = cleanLabel(body.label);
-    if (title !== undefined) card.title = title;
-    if (description !== undefined) card.description = description;
-    if (label !== undefined) card.label = label;
+    const updates = { title, description, label };
+    for (const [field, value] of Object.entries(updates)) {
+      if (value === undefined || value === card[field]) continue;
+      card[field] = value;
+      addHistory(card, { type: 'edited', field, from: card[field], to: value });
+    }
     return card;
   }],
 
@@ -179,6 +192,7 @@ const routes = [
     const { column, index, card } = findCard(id);
     column.cards.splice(index, 1);
     target.cards.splice(clampIndex(body.index, target.cards.length), 0, card);
+    if (target !== column) addHistory(card, { type: 'moved', from: column.title, to: target.title });
     return board;
   }],
 ];

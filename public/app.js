@@ -315,8 +315,28 @@ function openCardDialog(id) {
   cardForm.querySelector(`input[name="label"][value="${card.label}"]`).checked = true;
   document.getElementById('card-meta').textContent =
     `In "${column.title}" · created ${new Date(card.createdAt).toLocaleString()}`;
+  renderHistory(card);
   dialog.showModal();
   cardForm.title.focus();
+}
+
+function describeHistory(entry) {
+  const short = (v) => (v.length > 40 ? `${v.slice(0, 40)}…` : v || '(empty)');
+  if (entry.type === 'created') return `Created in "${entry.column}"`;
+  if (entry.type === 'moved') return `Moved from "${entry.from}" to "${entry.to}"`;
+  if (entry.type === 'edited') return `Changed ${entry.field} from "${short(entry.from)}" to "${short(entry.to)}"`;
+  return entry.type;
+}
+
+function renderHistory(card) {
+  const entries = [...(card.history || [])].reverse();
+  document.getElementById('card-history').replaceChildren(...(entries.length
+    ? entries.map((entry) => el('li', {},
+      el('span', { class: 'when' }, new Date(entry.at).toLocaleString()),
+      ' ',
+      describeHistory(entry),
+    ))
+    : [el('li', { class: 'empty' }, 'No history yet')]));
 }
 
 cardForm.addEventListener('submit', (e) => {
