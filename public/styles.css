@@ -229,6 +229,11 @@ dialog label input, dialog label textarea { font-weight: 400; font-size: 14px; c
 .label-swatch .none { background: var(--surface); border-style: dashed; border-color: var(--border); }
 
 .meta { margin: 0; color: var(--muted); font-size: 12px; }
+.history summary { cursor: pointer; font-weight: 600; font-size: 12px; color: var(--muted); }
+.history ol { list-style: none; margin: 8px 0 0; padding: 0; max-height: 160px; overflow-y: auto; font-size: 13px; }
+.history li { padding: 4px 0; border-top: 1px solid var(--border); }
+.history li:first-child { border-top: 0; }
+.history time { display: block; color: var(--muted); font-size: 11px; }
 .dialog-actions { display: flex; gap: 8px; }
 .spacer { flex: 1; }
 

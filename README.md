@@ -16,6 +16,7 @@ Use another port with `PORT=4000 node server.js`.
 
 - Columns: add, rename (click the title), delete, drag the header to reorder
 - Cards: add, edit title/description/color label, delete, drag within and between columns
+- Card history: each card records when it was created, edited and moved between columns (shown in the card dialog, last 100 entries)
 - Filter cards by text
 - Light and dark mode (follows your system)
 - Everything is saved to `data.json` next to `server.js`. Delete that file to reset the board.
