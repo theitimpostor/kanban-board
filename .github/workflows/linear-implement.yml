@@ -5,6 +5,8 @@
 #   {"event_type": "linear-issue", "client_payload": {"issue": "ENG-123"}}
 # or by hand from the Actions tab (workflow_dispatch).
 #
+# Once the PR is open it starts the review agent (claude-review.yml).
+#
 # Secrets: ANTHROPIC_API_KEY, LINEAR_API_KEY. See docs/linear-claude-workflow.md.
 name: Implement Linear issue
 
@@ -21,6 +23,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write # start the review agent
 
 concurrency:
   group: linear-${{ github.event.client_payload.issue || inputs.issue }}
@@ -202,6 +205,14 @@ jobs:
             mutation($id: String!, $stateId: String!) {
               issueUpdate(id: $id, input: { stateId: $stateId }) { success }
             }' "$(jq -n --arg id "$ISSUE_ID" --arg stateId "$STATE_ID" '{id: $id, stateId: $stateId}')"
+
+      # PRs opened with GITHUB_TOKEN don't trigger pull_request workflows, so start
+      # the review agent directly. It hands changes to the fix agent (claude-fix.yml).
+      - name: Start review agent
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: gh workflow run claude-review.yml --ref "$BASE_BRANCH" -f pr_number="${PR_URL##*/}"
 
       - name: Report failure to Linear
         if: failure() && steps.issue.outputs.id

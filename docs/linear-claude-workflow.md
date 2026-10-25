@@ -45,8 +45,39 @@ an issue identifier.
 | Commit and push | Commits everything Claude changed to `claude/<identifier>` (for example `claude/eng-123`). |
 | Pull request | Opens a PR titled `ENG-123: <title>` with Claude's summary as the body. Re-running for the same issue force-pushes the branch and updates the open PR. |
 | Linear | Comments the PR link on the issue and moves it to `In Review`. |
+| Review | Starts the review agent on the new PR. |
 
 Runs for the same issue are queued, never run in parallel.
+
+## Review and fix agents
+
+Each PR the developer agent opens goes through a review loop:
+
+1. **Review agent** (`claude-review.yml`): Claude reviews the PR read-only (only the Read, Glob
+   and Grep tools, no GitHub token) and posts a review with inline comments.
+   - **Approve:** labels the PR `agent-approved`. A human still merges it.
+   - **Request changes:** starts the fix agent.
+2. **Fix agent** (`claude-fix.yml`): Claude addresses the review on the PR's branch, the workflow
+   pushes the fixes, comments a summary and starts the review agent again.
+3. After **3 review rounds** still requesting changes, the loop stops: the PR gets the
+   `needs-human` label and a comment asking a person to take over. The same happens if either
+   agent fails, or if the fix agent makes no changes.
+
+Details:
+
+- Reviews are posted as comments, with the verdict in the review text and the labels. GitHub
+  doesn't let the account that opened a PR approve it or request changes, and a bot approval
+  shouldn't count toward merging anyway.
+- Inline comments on lines outside the diff would make GitHub reject the whole review, so they
+  are listed in the review body instead.
+- The agents only act on open PRs in this repository opened by `github-actions[bot]`, and a
+  review and a fix never run on the same PR at once.
+- Rounds are counted from the review agent's earlier reviews on the PR, so re-running the review
+  agent on a PR that already had 3 just hands it to a human again. To allow more rounds, raise
+  `MAX_REVIEW_ROUNDS` in `claude-review.yml`.
+- Helper scripts in `.github/scripts/` always come from the default branch, never from the PR.
+- The agents start each other with `workflow_dispatch`, because pushes, PRs and reviews made with
+  `GITHUB_TOKEN` don't trigger workflows. You can also run either one by hand with a PR number.
 
 ## Guardrails
 

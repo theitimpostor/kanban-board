@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["approve", "request_changes"],
+      "description": "request_changes only for problems that should block merging"
+    },
+    "summary": {
+      "type": "string",
+      "description": "What the change does and your assessment; for request_changes, exactly what must change"
+    },
+    "comments": {
+      "type": "array",
+      "description": "One per specific problem, on a line of the new file version that appears in the diff",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "File path relative to the repository root" },
+          "line": { "type": "integer", "minimum": 1, "description": "Line number in the new version of the file" },
+          "body": { "type": "string", "description": "The problem and how to fix it" }
+        },
+        "required": ["path", "line", "body"]
+      }
+    }
+  },
+  "required": ["verdict", "summary", "comments"]
+}
