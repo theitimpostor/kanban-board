@@ -1,4 +1,6 @@
 const LABELS = ['none', 'red', 'orange', 'yellow', 'green', 'blue', 'purple'];
+const PRIORITIES = ['none', 'low', 'medium', 'high', 'urgent'];
+const PRIORITY_NAMES = { none: 'No priority', low: 'Low', medium: 'Medium', high: 'High', urgent: 'Urgent' };
 
 const boardEl = document.getElementById('board');
 const searchEl = document.getElementById('search');
@@ -129,6 +131,9 @@ function renderCard(card) {
   },
     card.label !== 'none' ? el('div', { class: 'label-bar', style: `background: var(--label-${card.label})` }) : null,
     el('div', { class: 'title' }, card.title),
+    priorityOf(card) !== 'none'
+      ? el('span', { class: `priority priority-${priorityOf(card)}`, title: 'Priority' }, PRIORITY_NAMES[priorityOf(card)])
+      : null,
     card.description ? el('div', { class: 'desc-hint' }, '☰ Has description') : null,
   );
 
@@ -141,6 +146,11 @@ function renderCard(card) {
   cardEl.addEventListener('dragend', endDrag);
 
   return cardEl;
+}
+
+// Cards saved before priorities existed have no priority field.
+function priorityOf(card) {
+  return card.priority || 'none';
 }
 
 function placeCardPlaceholder(list, y) {
@@ -297,6 +307,10 @@ labelOptions.append(...LABELS.map((label) =>
   ),
 ));
 
+document.getElementById('priority-select').append(...PRIORITIES.map((priority) =>
+  el('option', { value: priority }, PRIORITY_NAMES[priority]),
+));
+
 function findCard(id) {
   for (const column of board.columns) {
     const card = column.cards.find((c) => c.id === id);
@@ -313,6 +327,7 @@ function openCardDialog(id) {
   cardForm.title.value = card.title;
   cardForm.description.value = card.description;
   cardForm.querySelector(`input[name="label"][value="${card.label}"]`).checked = true;
+  cardForm.priority.value = priorityOf(card);
   document.getElementById('card-meta').textContent =
     `In "${column.title}" · created ${new Date(card.createdAt).toLocaleString()}`;
   dialog.showModal();
@@ -328,6 +343,7 @@ cardForm.addEventListener('submit', (e) => {
     title,
     description: cardForm.description.value,
     label: cardForm.label.value,
+    priority: cardForm.priority.value,
   });
 });
 
