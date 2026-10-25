@@ -321,7 +321,10 @@ function openCardDialog(id) {
 }
 
 function describeHistory(entry) {
-  const short = (v) => (v.length > 40 ? `${v.slice(0, 40)}…` : v || '(empty)');
+  const short = (v) => {
+    const s = String(v ?? '');
+    return s.length > 40 ? `${s.slice(0, 40)}…` : s || '(empty)';
+  };
   if (entry.type === 'created') return `Created in "${entry.column}"`;
   if (entry.type === 'moved') return `Moved from "${entry.from}" to "${entry.to}"`;
   if (entry.type === 'edited') return `Changed ${entry.field} from "${short(entry.from)}" to "${short(entry.to)}"`;

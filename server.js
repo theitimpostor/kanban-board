@@ -176,8 +176,9 @@ const routes = [
     const updates = { title, description, label };
     for (const [field, value] of Object.entries(updates)) {
       if (value === undefined || value === card[field]) continue;
+      const from = card[field];
       card[field] = value;
-      addHistory(card, { type: 'edited', field, from: card[field], to: value });
+      addHistory(card, { type: 'edited', field, from, to: value });
     }
     return card;
   }],
